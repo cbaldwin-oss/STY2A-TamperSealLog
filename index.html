@@ -701,7 +701,7 @@ async function initApp() {
     // Update the Realtime listener (around line 433)
     _supabase
     .channel('schema-db-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'Assets' }, (payload) => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'STY2Assets' }, (payload) => {
         if (isEditMode || isPreviewMode) return;
 
         if (payload.eventType === 'INSERT') {
@@ -789,7 +789,7 @@ async function findDuplicates() {
 async function loadBrokenAssets() {
     const select = document.getElementById('brokenAssetSelect');
     const { data, error } = await _supabase
-        .from('Assets')
+        .from('STY2Assets')
         .select('asset_name')
         .ilike('status', '%broken%'); // Matches 'Broken' case-insensitive
 
@@ -809,7 +809,7 @@ async function loadBrokenSealsForAsset(assetName) {
     const list = document.getElementById('sealCheckboxList');
     
     const { data, error } = await _supabase
-        .from('Assets')
+        .from('STY2Assets')
         .select('id, seal_number, location, sub_area')
         .eq('asset_name', assetName)
         .ilike('status', '%broken%');
@@ -866,8 +866,8 @@ function generateReinspectionPreview() {
 }
 
 async function fetchLookupData() {
-    // Replace 'AssetRegistry' with your actual reference table name
-    const { data, error } = await _supabase.from('AssetRegistry').select('asset_name, location');
+    // Replace 'STY2AssetRegistry' with your actual reference table name
+    const { data, error } = await _supabase.from('STY2AssetRegistry').select('asset_name, location');
     
     if (error) {
         console.error("Error fetching lookups:", error);
@@ -962,16 +962,15 @@ function exitEditUI() {
 async function fetchHierarchyData(isSilent = false) {
     const container = document.getElementById('main-content-area');
     
-    // 1. Capture State and Scroll Position
+    // 1. Capture State and Scroll Position to prevent UI jumps
     const openAreas = new Set();
     const openAssets = new Set();
-    const scrollPos = window.scrollY; // Capture current view point
+    const scrollPos = window.scrollY; 
     
     if (isSilent) {
         document.querySelectorAll('.area-container').forEach(areaDiv => {
             const content = areaDiv.querySelector('.area-content');
             if (content && !content.classList.contains('hidden')) {
-                // Use trim() to ensure matching is exact
                 const name = areaDiv.querySelector('.area-header span').innerText.replace('Area: ', '').trim();
                 openAreas.add(name);
             }
@@ -982,31 +981,15 @@ async function fetchHierarchyData(isSilent = false) {
             }
         });
     } else {
-        container.innerHTML = '<p style="text-align:center; padding:20px;">Scanning 10,000 entries for Areas and Assets...</p>';
+        container.innerHTML = '<p style="text-align:center; padding:20px;">Scanning entries for Areas and Assets...</p>';
     }
 
     let allRecords = [];
     let from = 0, to = 999, fetchMore = true;
 
+    // 2. RESTORED SAFE FETCH: Uses select('*') to ensure client-side filters have access to all data
     while (fetchMore && allRecords.length < 10000) {
-        // 1. Initialize the query with restricted columns instead of select('*')
-        let queryBuilder = _supabase
-            .from('Assets')
-            .select('id, asset_name, location, sub_area, seal_number, inspection_date, signoff, inspection_notes, status, break_date, responsible_party, break_reason');
-
-        // 2. Apply Location Filters on the database level
-        if (!activeFilters.locations.has('All')) {
-            queryBuilder = queryBuilder.in('location', [...activeFilters.locations]);
-        }
-        
-        // 3. Apply Status Filters on the database level
-        if (!activeFilters.statuses.has('All')) {
-            queryBuilder = queryBuilder.in('status', [...activeFilters.statuses]);
-        }
-
-        // 4. Run the query with the current pagination range
-        const { data, error } = await queryBuilder.range(from, to);
-        
+        const { data, error } = await _supabase.from('STY2Assets').select('*').range(from, to);
         if (error) {
             container.innerHTML = '<p style="text-align:center; color:red;">Error loading log hierarchy.</p>';
             return;
@@ -1018,7 +1001,8 @@ async function fetchHierarchyData(isSilent = false) {
 
     allHierarchyRecords = allRecords;
     createFilterButtons();
-    // Pass everything including scroll position to the renderer
+    
+    // Render the visual layout locally using the complete cache
     await renderFilteredLog(openAreas, openAssets, scrollPos);
 }
 
@@ -1373,31 +1357,20 @@ async function toggleAsset(header, assetName) {
 }
 
 async function fetchAndRender(container, assetName) {
-    container.innerHTML = '<p style="padding:10px;">Loading up to 10,000 entries...</p>';
-    
-    let entries = [];
-    let from = 0, to = 999, fetchMore = true;
-
-    while (fetchMore && entries.length < 10000) {
-        const { data, error } = await _supabase
-    .from('Assets')
-    .select('id, asset_name, location, sub_area, seal_number, inspection_date, signoff, inspection_notes, status, break_date, responsible_party, break_reason')
-    .range(from, to);
-        if (error) return;
-        entries = entries.concat(data);
-        if (data.length < 1000) fetchMore = false;
-        else { from += 1000; to += 1000; }
-    }
+    // 1. Grab data instantly from the local cache instead of re-downloading it
+    // 2. FILTER by the specific assetName so it only shows the correct seals
+    let entries = allHierarchyRecords.filter(r => r.asset_name === assetName);
 
     let filteredData = entries;
 
+    // Apply Duplicate Filter
     if (duplicateSealList) {
         filteredData = filteredData.filter(r => 
             duplicateSealList.includes((r.seal_number || "").toString().trim())
         );
     }
 
-    // 1. Apply multi-status filtering
+    // Apply multi-status filtering
     if (!activeFilters.statuses.has('All')) {
         const targetStats = [...activeFilters.statuses].map(s => s.toLowerCase());
         filteredData = filteredData.filter(r => {
@@ -1406,7 +1379,7 @@ async function fetchAndRender(container, assetName) {
         });
     }
 
-    // 2. ADDED: Apply search filtering to individual rows
+    // Apply search filtering to individual rows
     const query = activeFilters.search;
     if (query !== '') {
         filteredData = filteredData.filter(r => {
@@ -1415,7 +1388,7 @@ async function fetchAndRender(container, assetName) {
         });
     }
 
-    // 3. Sort: Broken first
+    // Sort: Broken first
     filteredData.sort((a, b) => {
         const getP = (s) => (s||'').toLowerCase().includes('broken') ? 1 : (s||'').toLowerCase().includes('intact') ? 2 : 3;
         return getP(a.status) - getP(b.status);
@@ -1448,7 +1421,7 @@ async function deleteSelected() {
 
     // 2. Perform the deletion in the database
     const { error } = await _supabase
-        .from('Assets') 
+        .from('STY2Assets') 
         .delete()
         .in('id', idsToDelete); // Ensure your primary key column is lowercase 'id'
 
@@ -1479,7 +1452,7 @@ async function saveAllChanges() {
         // We use 'location' (lowercase) to match the keys in syncEdit
         // and the previous successful payloads.
         updatePromises.push(
-            _supabase.from('Assets').update(changes).eq('id', Number(id))
+            _supabase.from('STY2Assets').update(changes).eq('id', Number(id))
         );
     }
 
@@ -1627,7 +1600,7 @@ async function loadBrokenSealsForAsset(assetName) {
     const list = document.getElementById('sealCheckboxList');
     
     const { data, error } = await _supabase
-        .from('Assets')
+        .from('STY2Assets')
         .select('id, seal_number, location, sub_area')
         .eq('asset_name', assetName)
         .ilike('status', '%broken%');
@@ -1810,7 +1783,7 @@ async function saveNewEntries() {
             };
         });
 
-        const { error } = await _supabase.from('Assets').insert(newRecords);
+        const { error } = await _supabase.from('STY2Assets').insert(newRecords);
         if (error) throw error;
 
         // Success Cleanup
