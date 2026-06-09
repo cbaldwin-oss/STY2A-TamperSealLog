@@ -522,6 +522,20 @@ input:not([type="checkbox"]), textarea, select {
     background: #fafafa;
     cursor: pointer;
 }
+/* Updated Header Left to include a gap between the image and the title */
+.header-left {
+    flex: 1; 
+    display: flex;
+    align-items: center;
+    gap: 20px; /* Adds space between the logo and the red title box */
+}
+
+/* New style to ensure the logo fits nicely inside the header */
+.header-logo {
+    max-height: 50px; /* Keeps the image from stretching the 80px header */
+    width: auto;      /* Maintains the image's aspect ratio */
+    object-fit: contain;
+}
     </style>
 </head>
 <body>
@@ -530,6 +544,7 @@ input:not([type="checkbox"]), textarea, select {
 
 <div class="header">
     <div class="header-left">
+        <img src="https://lh3.googleusercontent.com/u/0/d/1uVtWyL2Zx9zQE6oDCQ_AC3CbJk7n-R-6" alt="Company Logo" class="header-logo">
         <div class="seal-log-header">Tamper Seal Log</div>
     </div>
     <div class="header-right" id="filter-container"></div>
@@ -1804,4 +1819,3 @@ window.onload = initApp;
 </script>
 </body>
 </html>
-
